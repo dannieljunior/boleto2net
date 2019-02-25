@@ -25,21 +25,27 @@ namespace Boleto2Net
             IdsRetornoCnab400RegistroDetalhe.Add("1");
         }
 
+        public string FormatarNomeArquivoRemessa(int numeroSequencial)
+        {
+            return $"CB{DateTime.Now.Date.Day:00}{DateTime.Now.Date.Month:00}{numeroSequencial.ToString().PadLeft(9, '0').Right(2)}.rem";
+        }
+
         public void FormataCedente()
         {
             var contaBancaria = Cedente.ContaBancaria;
             if (!CarteiraFactory<BancoCaixa>.CarteiraEstaImplementada(contaBancaria.CarteiraComVariacaoPadrao))
                 throw Boleto2NetException.CarteiraNaoImplementada(contaBancaria.CarteiraComVariacaoPadrao);
 
+            contaBancaria.FormatarDados("PREFERENCIALMENTE NAS CASAS LOTERICAS ATE O VALOR LIMITE", "", "SAC CAIXA: 0800 726 0101 (informações, reclamações, sugestões e elogios)<br>Para pessoas com deficiência auditiva ou de fala: 0800 726 2492<br>Ouvidoria: 0800 725 7474<br>caixa.gov.br<br>", 6);
+
             var codigoCedente = Cedente.Codigo;
-            Cedente.Codigo = codigoCedente.Length <= 6 ? codigoCedente.PadLeft(6, '0') : throw Boleto2NetException.CodigoCedenteInvalido(codigoCedente, 6);
+            Cedente.Codigo = codigoCedente.Length <= 6 ? codigoCedente.PadLeft(6, '0') : throw Boleto2NetException.CodigoCedenteInvalido(codigoCedente, 9);
 
             if (Cedente.CodigoDV == Empty)
                 throw new Exception($"Dígito do código do cedente ({codigoCedente}) não foi informado.");
 
             Cedente.CodigoFormatado = $"{contaBancaria.Agencia} / {codigoCedente}-{Cedente.CodigoDV}";
 
-            contaBancaria.LocalPagamento = "ATÉ O VENCIMENTO EM QUALQUER BANCO. APÓS O VENCIMENTO SOMENTE NA CAIXA ECONÔMICA FEDERAL.";
         }
 
         public void ValidaBoleto(Boleto boleto)
@@ -387,6 +393,7 @@ namespace Boleto2Net
                 reg.Adicionar(TTiposDadoEDI.ediNumericoSemSeparador_, 0009, 005, 0, numeroRegistroGeral, '0');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0014, 001, 0, "P", '0');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0015, 001, 0, Empty, ' ');
+                //abaixo a ocorrencia que define novo titulo (01) ou cancelamento (02)
                 reg.Adicionar(TTiposDadoEDI.ediNumericoSemSeparador_, 0016, 002, 0, boleto.CodigoOcorrencia, '0');
                 reg.Adicionar(TTiposDadoEDI.ediNumericoSemSeparador_, 0018, 005, 0, boleto.Banco.Cedente.ContaBancaria.Agencia, '0');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0023, 001, 0, boleto.Banco.Cedente.ContaBancaria.DigitoAgencia, ' ');
@@ -656,10 +663,16 @@ namespace Boleto2Net
 
         public void LerHeaderRetornoCNAB240(ArquivoRetorno arquivoRetorno, string registro)
         {
-            ////144 - 151 Data de geração do arquivo N 008 DDMMAAAA
-            //arquivoRetorno.DataGeracao = Utils.ToDateTime(Utils.ToInt32(registro.Substring(143, 8)).ToString("##-##-####"));
-            ////158 - 163 Nº seqüencial do arquivo N 006
-            //arquivoRetorno.NumeroSequencial = Utils.ToInt32(registro.Substring(157, 6));
+            //144 - 151 Data de geração do arquivo N 008 DDMMAAAA
+            arquivoRetorno.DataGeracao = Utils.ToDateTime(Utils.ToInt32(registro.Substring(143, 8)).ToString("##-##-####"));
+            //158 - 163 Nº seqüencial do arquivo N 006
+            arquivoRetorno.NumeroSequencial = Utils.ToInt32(registro.Substring(157, 6));
+
+            //158 - 163 Nº seqüencial do arquivo N 006
+            arquivoRetorno.NumeroSequencial = Utils.ToInt32(registro.Substring(157, 6));
+
+            // 172 - 191 Para Uso Reservado do Banco. único campo que encontrei para identificar o retorno do banco sobre a situação do arquivo.
+            arquivoRetorno.ReservadoBanco = registro.Substring(171, 20);
         }
 
         public void LerDetalheRetornoCNAB240SegmentoT(ref Boleto boleto, string registro)
@@ -686,11 +699,11 @@ namespace Boleto2Net
 
                 //Identificação do Título no Banco
                 boleto.NossoNumero = registro.Substring(39, 17);
-                boleto.NossoNumeroDV = "";
-                boleto.NossoNumeroFormatado = boleto.NossoNumero;
+                boleto.NossoNumeroDV = registro.Substring(56, 1);
+                boleto.NossoNumeroFormatado = Format("{0}-{1}", boleto.NossoNumero, boleto.NossoNumeroDV);
 
                 //Identificação de Ocorrência
-                boleto.CodigoOcorrencia = registro.Substring(108, 2);
+                boleto.CodigoOcorrencia = registro.Substring(15, 2);
                 boleto.DescricaoOcorrencia = Cnab.OcorrenciaCnab240(boleto.CodigoOcorrencia);
                 boleto.CodigoOcorrenciaAuxiliar = registro.Substring(213, 10);
 
@@ -818,11 +831,6 @@ namespace Boleto2Net
 
         public void LerTrailerRetornoCNAB400(string registro)
         {
-        }
-
-        public string FormatarNomeArquivoRemessa(int numeroSequencial)
-        {
-            return numeroSequencial.ToString();
         }
 
         private string DescricaoOcorrenciaCnab400(string codigo, string codigoRejeicao)

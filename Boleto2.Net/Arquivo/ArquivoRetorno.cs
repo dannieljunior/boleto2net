@@ -13,6 +13,8 @@ namespace Boleto2Net
         public DateTime? DataGeracao { get; set; }
         public int? NumeroSequencial { get; set; }
 
+        public string ReservadoBanco { get; set; }
+
         private bool _ignorarCarteiraBoleto = false;
         #region Construtores
 

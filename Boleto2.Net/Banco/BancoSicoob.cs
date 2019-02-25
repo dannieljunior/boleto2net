@@ -36,7 +36,7 @@ namespace Boleto2Net
             if (Cedente.CodigoDV == Empty)
                 throw new Exception($"Dígito do código do cedente ({codigoCedente}) não foi informado.");
 
-            contaBancaria.FormatarDados("PAGÁVEL EM QUALQUER BANCO ATÉ A DATA DE VENCIMENTO.", "", 8);
+            contaBancaria.FormatarDados("PAGÁVEL EM QUALQUER BANCO ATÉ A DATA DE VENCIMENTO.", "", "", 8);
 
             Cedente.Codigo = codigoCedente.Length <= 6 ? codigoCedente.PadLeft(6, '0'): throw Boleto2NetException.CodigoCedenteInvalido(codigoCedente, 6);
 
@@ -413,10 +413,13 @@ namespace Boleto2Net
                 var codMulta = "0";
                 if (boleto.ValorMulta > 0)
                     codMulta = "1";
-                var msg3 = boleto.MensagemArquivoRemessa.PadRight(500, ' ').Substring(00, 40).FitStringLength(40, ' ');
-                var msg4 = boleto.MensagemArquivoRemessa.PadRight(500, ' ').Substring(40, 40).FitStringLength(40, ' ');
-                if (codMulta == "0" & IsNullOrWhiteSpace(msg3))
+
+
+                if (codMulta == "0")
+                {
+                    // Se não tiver informação sobre Multa, não precisa gerar o registro.
                     return "";
+                }
 
                 numeroRegistroGeral++;
                 TRegistroEDI reg = new TRegistroEDI();
@@ -437,8 +440,8 @@ namespace Boleto2Net
                 reg.Adicionar(TTiposDadoEDI.ediDataDDMMAAAA_________, 0067, 008, 0, boleto.DataMulta, '0');
                 reg.Adicionar(TTiposDadoEDI.ediNumericoSemSeparador_, 0075, 015, 2, boleto.ValorMulta, '0');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0090, 010, 0, Empty, ' ');
-                reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0100, 040, 0, msg3, ' ');
-                reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0140, 040, 0, msg4, ' ');
+                reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0100, 040, 0, Empty, ' ');
+                reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0140, 040, 0, Empty, ' ');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0180, 020, 0, Empty, ' ');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0200, 008, 0, "0", '0');
                 reg.Adicionar(TTiposDadoEDI.ediAlphaAliEsquerda_____, 0208, 003, 0, "0", '0');
@@ -705,10 +708,31 @@ namespace Boleto2Net
         #region Retorno - CNAB240
         public void LerHeaderRetornoCNAB240(ArquivoRetorno arquivoRetorno, string registro)
         {
-            ////144 - 151 Data de geração do arquivo N 008 DDMMAAAA
-            //arquivoRetorno.DataGeracao = Utils.ToDateTime(Utils.ToInt32(registro.Substring(143, 8)).ToString("##-##-####"));
-            ////158 - 163 Nº seqüencial do arquivo N 006
-            //arquivoRetorno.NumeroSequencial = Utils.ToInt32(registro.Substring(157, 6));
+            arquivoRetorno.Banco.Cedente = new Cedente();
+            //05.0	018	018	001 - Tipo de Inscrição da Empresa: '1' = CPF '2' = CGC / CNPJ
+            //06.0	019	032	014 - Número de Inscrição da Empresa
+            arquivoRetorno.Banco.Cedente.CPFCNPJ = registro.Substring(17, 1) == "1" ? registro.Substring(21, 11) : registro.Substring(18, 14);
+
+            //arquivoRetorno.Banco.Cedente.Codigo = ?;
+            //13.0	073	102	030 - Nome da Empresa
+            arquivoRetorno.Banco.Cedente.Nome = registro.Substring(72, 30).Trim();
+
+
+            arquivoRetorno.Banco.Cedente.ContaBancaria = new ContaBancaria();
+            //08.0	053	057	005	- Prefixo da Cooperativa: vide planilha "Capa" deste arquivo
+            arquivoRetorno.Banco.Cedente.ContaBancaria.Agencia = registro.Substring(52, 5);
+            //09.0	058	058	001 - Dígito Verificador do Prefixo: vide planilha "Capa" deste arquivo
+            arquivoRetorno.Banco.Cedente.ContaBancaria.DigitoAgencia = registro.Substring(57, 1);
+            //10.0	059	070	012 - Conta Corrente: vide planilha "Capa" deste arquivo
+            arquivoRetorno.Banco.Cedente.ContaBancaria.Conta = registro.Substring(58, 12);
+            //11.0	071	071	001 - Dígito Verificador da Conta: vide planilha "Capa" deste arquivo
+            arquivoRetorno.Banco.Cedente.ContaBancaria.DigitoConta = registro.Substring(70, 1);
+
+
+            //17.0 144 151 008 - Num - Data de Geração do Arquivo
+            arquivoRetorno.DataGeracao = Utils.ToDateTime(Utils.ToInt32(registro.Substring(143, 8)).ToString("##-##-####"));
+            //19.0 158 163 006 - Num - Seqüência (NSA)
+            arquivoRetorno.NumeroSequencial = Utils.ToInt32(registro.Substring(157, 6));
         }
         public void LerDetalheRetornoCNAB240SegmentoT(ref Boleto boleto, string registro)
         {
@@ -754,6 +778,11 @@ namespace Boleto2Net
 
                 //Data Vencimento do Título
                 boleto.DataVencimento = Utils.ToDateTime(Utils.ToInt32(registro.Substring(73, 8)).ToString("##-##-####"));
+
+                //18.3T 97 99 3 - Num Banco Cobr./Receb.
+                boleto.BancoCobradorRecebedor = registro.Substring(96, 3);
+                //19.3T 100 104 5 - Num	Ag. Cobradora
+                boleto.AgenciaCobradoraRecebedora = registro.Substring(99, 6);
 
                 //Dados Sacado
                 boleto.Sacado = new Sacado();
